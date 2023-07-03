@@ -6,7 +6,7 @@
 /*  in the prover_snapshots directory (which include copies of their                     */
 /*  licences), is subject to the BSD two-clause licence below.                           */
 /*                                                                                       */
-/*  Copyright (c) 2017-2023                                                              */
+/*  Copyright (c) 2017-2021                                                              */
 /*    Prashanth Mundkur                                                                  */
 /*    Rishiyur S. Nikhil and Bluespec, Inc.                                              */
 /*    Jon French                                                                         */
@@ -23,8 +23,6 @@
 /*    Microsoft, for contributions by Robert Norton-Wright and Nathaniel Wesley Filardo  */
 /*    Peter Rugg                                                                         */
 /*    Aril Computer Corp., for contributions by Scott Johnson                            */
-/*    Philipp Tomsich                                                                    */
-/*    VRULL GmbH, for contributions by its employees                                     */
 /*                                                                                       */
 /*  All rights reserved.                                                                 */
 /*                                                                                       */
@@ -122,9 +120,15 @@ val plat_mtval_has_illegal_inst_bits = {ocaml: "Platform.mtval_has_illegal_inst_
 val plat_rom_base   = {ocaml: "Platform.rom_base", interpreter: "Platform.rom_base", c: "plat_rom_base", lem: "plat_rom_base"} : unit -> xlenbits
 val plat_rom_size   = {ocaml: "Platform.rom_size", interpreter: "Platform.rom_size", c: "plat_rom_size", lem: "plat_rom_size"} : unit -> xlenbits
 
+
 /* Location of clock-interface, which should match with the spec in the DTB */
 val plat_clint_base = {ocaml: "Platform.clint_base", interpreter: "Platform.clint_base", c: "plat_clint_base", lem: "plat_clint_base"} : unit -> xlenbits
 val plat_clint_size = {ocaml: "Platform.clint_size", interpreter: "Platform.clint_size", c: "plat_clint_size", lem: "plat_clint_size"} : unit -> xlenbits
+
+/* Location of plic */
+val plat_plic_base = {ocaml: "Platform.clint_base", interpreter: "Platform.clint_base", c: "plat_plic_base", lem: "plat_plic_base"} : unit -> xlenbits  /* Need to implement for ocaml*/
+val plat_plic_size = {ocaml: "Platform.clint_size", interpreter: "Platform.clint_size", c: "plat_plic_size", lem: "plat_plic_size"} : unit -> xlenbits
+/* Need to implement for ocaml*/
 
 /* Location of HTIF ports */
 val plat_htif_tohost = {ocaml: "Platform.htif_tohost", c: "plat_htif_tohost", lem: "plat_htif_tohost"} : unit -> xlenbits
@@ -178,6 +182,19 @@ function within_clint forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, wi
     clint_base_int <= addr_int
   & (addr_int + sizeof('n)) <= (clint_base_int + clint_size_int)
 }
+
+function within_plic forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : atom('n)) -> bool = {
+  /* To avoid overflow issues when physical memory extends to the end
+   * of the addressable range, we need to perform address bound checks
+   * on unsigned unbounded integers.
+   */
+  let addr_int       = unsigned(addr);
+  let plic_base_int = unsigned(plat_plic_base ());
+  let plic_size_int = unsigned(plat_plic_size ());
+    plic_base_int <= addr_int
+  & (addr_int + sizeof('n)) <= (plic_base_int + plic_size_int)
+}
+
 
 function within_htif_writable forall 'n, 0 < 'n <= max_mem_access . (addr : xlenbits, width : atom('n)) -> bool =
     plat_htif_tohost() == addr | (plat_htif_tohost() + 4 == addr & width == 4)
@@ -283,6 +300,7 @@ function clint_dispatch() -> unit = {
   }
 }
 
+
 /* The rreg effect is due to checking mtime. */
 val clint_store: forall 'n, 'n > 0. (xlenbits, int('n), bits(8 * 'n)) -> MemoryOpResult(bool) effect {rreg,wreg}
 function clint_store(addr, width, data) = {
@@ -322,9 +340,215 @@ val tick_clock : unit -> unit effect {rreg, wreg}
 function tick_clock() = {
   if   mcountinhibit.CY() == 0b0
   then mcycle = mcycle + 1;
-
   mtime  = mtime  + 1;
   clint_dispatch()
+}
+
+/* PLIC (Platform Level Interrupt Controller, assumes 32 interrupt sources) */
+
+/* PLIC (Platform Level Interrupt Controller, assumes 32 interrupt sources) */
+
+interrupt_source_priority : vector(32, inc, regtype) =
+[ EXTZ(0x0), EXTZ(0x4), EXTZ(0x8), EXTZ(0xc), EXTZ(0x10), EXTZ(0x14), EXTZ(0x18), EXTZ(0x1c), EXTZ(0x20), EXTZ(0x24), EXTZ(0x28), EXTZ(0x2c), EXTZ(0x30), EXTZ(0x34), EXTZ(0x38), EXTZ(0x3c), 
+  EXTZ(0x40), EXTZ(0x44), EXTZ(0x48), EXTZ(0x4c), EXTZ(0x50), EXTZ(0x54), EXTZ(0x58), EXTZ(0x5c), EXTZ(0x60), EXTZ(0x64), EXTZ(0x68), EXTZ(0x6c), EXTZ(0x70), EXTZ(0x74), EXTZ(0x78), EXTZ(0x7c) ]
+
+/* 32 Interrupt sources and their priority values including source 0 (source which doesn't exist) */
+
+register interrupt_pending_bits : bits(32)
+/* Interrupt pending bits for 32 interrupt sources */
+
+register interrupt_enable_bits : bits(32)
+/* Interrupt enable bits for 32 interrupt sources */    
+
+let priority_threshold_context0 : bits(32768) = EXTZ(0x0)
+
+register interrupt_claim_register_context0 : bits(32768) = EXTZ(0x0)
+/* Assumes single hart and this register located at 4K alignment*/
+
+let PLIC_INTERRUPT_PRIORITY_BASE : bits(32) = EXTZ(0x000000)
+let PLIC_INTERRUPT_PRIORITY_HI : bits(32) = EXTZ(0x000FFC)
+let PLIC_INTERRUPT_PENDING_BASE : bits(32) = EXTZ(0x001000)
+let PLIC_INTERRUPT_PENDING_HI : bits(32) = EXTZ(0x00107C)
+let PLIC_INTERRUPT_ENABLE_BASE : bits(32) = EXTZ(0x002000)
+let PLIC_INTERRUPT_ENABLE_HI : bits(32) = EXTZ(0x1F1FFC)
+let PLIC_PRIORITY_THRESHOLD_BASE : bits(32) = EXTZ(0x200000)
+let PLIC_PRIORITY_THRESHOLD_HI : bits(32) = EXTZ(0x3FFF000)
+let PLIC_INTERRUPT_CLAIM_BASE : bits(32) = EXTZ(0x200004)
+let PLIC_INTERRUPT_CLAIM_HI : bits(32) = EXTZ(0x3FFF004)
+let PLIC_INTERRUPT_COMPLETION_BASE : bits(32) = EXTZ(0x200004)
+let PLIC_INTERRUPT_COMPLETION_HI : bits(32) = EXTZ(0x3FFF004)
+
+val check_bit : (bits(32), int) -> bool
+function check_bit(bvec, position) = 
+{
+  check : bits(32) = sail_zero_extend(0b1, 32);
+  check = check << position;
+  check = check & bvec;
+  if check == sail_zeros(32)
+  then {false}
+  else	{true};
+}
+
+val set_bit: (int) -> bits(32)				/*This function has to be moved to other file or Need to check is there already one available*/
+function set_bit : (position) = 
+{
+  temp : bits(32) = sail_zero_extend(0b1, 32);
+  temp = temp << position;
+}
+
+val dec_bin : (int) -> bits(32)				/*This function has to be moved to other file or Need to check is there already one available*/
+function dec_bin : dec_num = {
+  binary_value : bits(32) = sail_zero_extend(0b0);
+  forEach (i from 0 to 31){
+    if tmod_int(dec_num, i) == 1
+    then  binary_value = binary_value | set_bit(i);    
+  }
+  binary_value;
+}
+
+function highest_priority_interrupt_pending() -> bits(32) = {
+  temp : bits(32) = sail_zero_extend(0b1);
+  pending : bool = false;
+  interrupt_id : int = 0;
+  cur_priority : bits(32) = EXTZ(0x0);
+  
+  forEach (i from 1 to 31){
+    if (check_bit(interrupt_pending_bits,i) & check_bit(interrupt_enable_bits, i))
+    then  {
+      if unsigned(cur_priority) < unsigned(interrupt_source_priority[i])
+      then  {
+        interrupt_id = i;
+        cur_priority = interrupt_source_priority[i];
+      }
+    }
+  }
+  cur_priority;  
+}
+
+/*This function will be called by an external software which simulates interrupt*/
+val plic_interrupt: forall 'n, 'n > 0. (source_id : bits(32)) -> MemoryOpResult(bool) effect {rreg,wreg}		
+function plic_interrupt(source_id)  = {
+  interrupt_pending_bits = interrupt_pending_bits | source_id;
+  if (interrupt_source_priority[source_id] > priority_threshold_context0) & (check_bit(interrupt_enable_bits, source_id))
+  then	plic_dispatch();  
+}
+
+function plic_dispatch() -> unit = {
+	temp : bits(32) = sail_zero_extend(0b1);
+	pending : bool = false;
+	forEach (i from 1 to 31){
+	  if (temp && interrupt_pending_bits) != sail_zero_extend(0b0, 32)
+	  then	pending = true;
+	  temp = temp << 1;
+	}
+	if pending
+	then	mip->MEI() = 0b1
+	else	mip->MEI() = 0b0;
+}
+
+val plic_load : forall 'n, 'n > 0. (AccessType(ext_access_type), xlenbits, int('n)) -> MemoryOpResult(bits(8 * 'n)) effect {rreg,wreg}
+function plic_load(t, addr, width) = {
+  let addr = addr - plat_plic_base ();
+  if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_PRIORITY_BASE)) & (unsigned(addr) <= unsigned(PLIC_INTERRUPT_PRIORITY_HI))
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    addr_int : int = tdiv_int(unsigned(addr - PLIC_INTERRUPT_CLAIM_BASE), 4);
+    MemValue(sail_zero_extend(interrupt_source_priority[addr_int]), 32);
+    }
+  }
+  
+  else if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_PENDING_BASE)) & unsigned(addr) <= unsigned(PLIC_INTERRUPT_PENDING_HI)
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    let addr_int : int = tdiv_int(unsigned(addr - PLIC_INTERRUPT_PRIORITY_BASE), 4);
+    match add_int {
+      0 => MemValue(sail_zero_extend(interrupt_pending_bits))
+      _ => /*Need to know what to do*/
+
+      /* This should be extended as the number of interrupt sources increases*/
+    }
+  }
+  
+  else if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_ENABLE_BASE)) & unsigned(addr) <= unsigned(PLIC_INTERRUPT_ENABLE_HI)
+  then  {
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+        let addr_int : int = tdiv_int(unsigned(addr - PLIC_INTERRUPT_ENABLE_BASE), 4);
+        match addr_int {
+          0 => MemValue(sail_zero_extend(interrupt_enable_bits))
+          _ => /* Need to know what to do*/
+        }
+  }
+  
+  else if (unsigned(addr) >= unsigned(PLIC_PRIORITY_THRESHOLD_BASE)) & unsigned(addr) <= unsigned(PLIC_PRIORITY_THRESHOLD_HI)
+  then  {
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+        let addr_int : int = tdiv_int(unsigned(addr - PLIC_PRIORITY_THRESHOLD_BASE), 4);
+        match addr_int {
+          0 => MemValue(sail_zero_extend(priority_threshold_context0))
+          _ => /* Need to know what to do*/
+        }
+  }
+  else if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_CLAIM_BASE)) & unsigned(addr) <= unsigned(PLIC_INTERRUPT_CLAIM_HI)
+  then  {
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+        let addr_int : int = tdiv_int(unsigned(addr - PLIC_INTERRUPT_CLAIM_BASE), 4);
+        match addr_int {
+          0 => MemValue(highest_priority_interrupt_pending())
+          _ => /* Need to know what to do*/
+        }
+  }
+  else {
+    if   get_config_print_platform()
+    then print_platform("clint[" ^ BitStr(addr) ^ "] -> <not-mapped>");
+    match t {
+      Execute()  => MemException(E_Fetch_Access_Fault()),
+      Read(Data) => MemException(E_Load_Access_Fault()),
+      _          => MemException(E_SAMO_Access_Fault())
+    }
+  }
+}
+
+val plic_store: forall 'n, 'n > 0. (xlenbits, int('n), bits(8 * 'n)) -> MemoryOpResult(bool) effect {rreg,wreg}
+function clint_store(addr, width, data) = {
+  let addr = addr - plat_clint_base ();
+  if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_PRIORITY_BASE)) & (unsigned(addr) <= unsigned(PLIC_INTERRUPT_PRIORITY_HI))
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    addr_int : int = tdiv_int(unsigned(addr - PLIC_INTERRUPT_CLAIM_BASE), 4);
+    interrupt_source_priority[addr_int] = data;
+    MemValue(true);
+  }  
+  else if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_ENABLE_BASE)) & (unsigned(addr) <= unsigned(PLIC_INTERRUPT_ENABLE_HI))
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    interrupt_enable_bits = data;
+    MemValue(true);
+  }
+  else if (unsigned(addr) >= unsigned(PLIC_PRIORITY_THRESHOLD_BASE)) & (unsigned(addr) <= unsigned(PLIC_PRIORITY_THRESHOLD_HI))
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    priority_threshold_context0 = data;
+    MemValue(true);
+  }
+  else if (unsigned(addr) >= unsigned(PLIC_INTERRUPT_COMPLETION_BASE)) & (unsigned(addr) <= unsigned(PLIC_INTERRUPT_COMPLETION_HI))
+  then	{
+    if get_config_platform()
+    then  print_platform("plic[" ^ BitStr(addr) ^ "] -> " ^ BitStr())
+    MemValue(true);
+  }
+  else {
+    if   get_config_print_platform()
+    then print_platform("plic[" ^ BitStr(addr) ^ "] <- " ^ BitStr(data) ^ " (<unmapped>)");
+    MemException(E_SAMO_Access_Fault())
+  }
 }
 
 /* Basic terminal character I/O. */
