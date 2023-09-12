@@ -365,6 +365,30 @@ let priority_threshold_context0 : bits(32768) = EXTZ(0x0)
 register interrupt_claim_register_context0 : bits(32768) = EXTZ(0x0)
 /* Assumes single hart and this register located at 4K alignment*/
 
+/* billmc
+    Rather than using immutable variables for this,  it seems to 
+    that this should be an enum/value mapping.  Something like this:
+
+    enum PLIC_ENUM = { 
+        PLIC_INTERRUPT_PRIORITY_BASE,
+        PLIC_INTERRUPT_PRIORITY_HI,
+        .
+        .
+        }
+
+    mapping plic_mapping : PLIC_ENUM <-> bits(32) = {
+        PLIC_INTERRUPT_PRIORITY_BASE <-> zero_extend(0x0),
+        PLIC_INTERRUPT_PRIORITY_HI   <-> zero_extend(0xFFC),
+        .
+        .
+        }
+
+    Also note that I've changed EXTZ to zero_extend. (EXTS needs to
+    be changed to sign_extend.)
+
+*/
+
+
 let PLIC_INTERRUPT_PRIORITY_BASE : bits(32) = EXTZ(0x000000)
 let PLIC_INTERRUPT_PRIORITY_HI : bits(32) = EXTZ(0x000FFC)
 let PLIC_INTERRUPT_PENDING_BASE : bits(32) = EXTZ(0x001000)
