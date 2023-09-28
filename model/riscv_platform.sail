@@ -1,3 +1,9 @@
+// billmc comments:  REVIEWED
+//  See comments in line,  tagged wtih billmc.
+//  Replace EXTZ()  with zero_extend() thoughout
+//  Replace EXTS()  with sign_extend() thoughout
+
+
 /*=======================================================================================*/
 /*  RISCV Sail Model                                                                     */
 /*                                                                                       */
@@ -223,7 +229,7 @@ register mtimecmp : bits(64)  // memory-mapped internal clint register.
  * bffc mtime hi
  */
 
-let MSIP_BASE        : xlenbits = EXTZ(0x00000)
+let MSIP_BASE        : xlenbits = EXTZ(0x00000)     // billmc:   replace EXTZ() with zero_extend() and so througout
 let MTIMECMP_BASE    : xlenbits = EXTZ(0x04000)
 let MTIMECMP_BASE_HI : xlenbits = EXTZ(0x04004)
 let MTIME_BASE       : xlenbits = EXTZ(0x0bff8)
@@ -364,6 +370,30 @@ let priority_threshold_context0 : bits(32768) = EXTZ(0x0)
 
 register interrupt_claim_register_context0 : bits(32768) = EXTZ(0x0)
 /* Assumes single hart and this register located at 4K alignment*/
+
+/* billmc
+    Rather than using immutable variables for this,  it seems to 
+    that this should be an enum/value mapping.  Something like this:
+
+    enum PLIC_ENUM = { 
+        PLIC_INTERRUPT_PRIORITY_BASE,
+        PLIC_INTERRUPT_PRIORITY_HI,
+        .
+        .
+        }
+
+    mapping plic_mapping : PLIC_ENUM <-> bits(32) = {
+        PLIC_INTERRUPT_PRIORITY_BASE <-> zero_extend(0x0),
+        PLIC_INTERRUPT_PRIORITY_HI   <-> zero_extend(0xFFC),
+        .
+        .
+        }
+
+    Also note that I've changed EXTZ to zero_extend. (EXTS needs to
+    be changed to sign_extend.)
+
+*/
+
 
 let PLIC_INTERRUPT_PRIORITY_BASE : bits(32) = EXTZ(0x000000)
 let PLIC_INTERRUPT_PRIORITY_HI : bits(32) = EXTZ(0x000FFC)

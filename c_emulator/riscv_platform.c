@@ -1,3 +1,15 @@
+// billmc comments:  REVIEWED
+//  It looks like you changed the formatting of this file.  Is there a reason 
+//  to do so?   Perhaps you started working on an okder version of this code?
+//  
+//
+//  RESERVATION_DBG was removed.  Why?
+//
+//  With regards to PLIC functionality,  it appears that only lines 61-65
+//  are new additions to this code, yes?
+
+
+
 #include "sail.h"
 #include "rts.h"
 #include "riscv_prelude.h"
