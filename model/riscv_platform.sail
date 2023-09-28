@@ -1,3 +1,9 @@
+// billmc comments:  REVIEWED
+//  See comments in line,  tagged wtih billmc.
+//  Replace EXTZ()  with zero_extend() thoughout
+//  Replace EXTS()  with sign_extend() thoughout
+
+
 /*=======================================================================================*/
 /*  RISCV Sail Model                                                                     */
 /*                                                                                       */
@@ -223,7 +229,7 @@ register mtimecmp : bits(64)  // memory-mapped internal clint register.
  * bffc mtime hi
  */
 
-let MSIP_BASE        : xlenbits = EXTZ(0x00000)
+let MSIP_BASE        : xlenbits = EXTZ(0x00000)     // billmc:   replace EXTZ() with zero_extend() and so througout
 let MTIMECMP_BASE    : xlenbits = EXTZ(0x04000)
 let MTIMECMP_BASE_HI : xlenbits = EXTZ(0x04004)
 let MTIME_BASE       : xlenbits = EXTZ(0x0bff8)

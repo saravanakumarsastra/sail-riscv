@@ -1,8 +1,18 @@
+// billmc comments:   REVIEWED
+//  See inline comments. (prefaced with "billmc"
+//  Side note:  we'll need to do something about the static
+//  configuration.  We'll want to make this configurable.
+
+
+
 #include "riscv_platform_impl.h"
 #include <unistd.h>
 #include <stdio.h>
 
 /* Settings of the platform implementation, with common defaults. */
+
+// billmc : while i like the format change here,  you may
+//  get some pushback from others.
 bool rv_enable_pmp                  = false;
 bool rv_enable_zfinx                = false;
 bool rv_enable_rvc                  = true;

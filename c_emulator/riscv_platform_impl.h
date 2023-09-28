@@ -1,3 +1,7 @@
+// billmc comments : REVIEWED
+//    looks fine to me.
+
+
 #pragma once
 
 #include <stdbool.h>
